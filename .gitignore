@@ -1,0 +1,7 @@
+logs
+.git
+.cache
+.idea
+.vscode
+exp
+__pycache__

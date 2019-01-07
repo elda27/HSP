@@ -23,7 +23,7 @@ class HierarchicalSurfacePredictor(chainer.Chain):
         C. Hane, et. al., “Hierarchical surface prediction for 3D object reconstruction,”
         Proc. - 2017 Int. Conf. 3D Vision, 3DV 2017, pp. 412–420, 2018.
     """
-
+    pad=2
     def __init__(
         self,
         in_ch=1, out_ch=1, n_level=5,
@@ -87,29 +87,36 @@ class HierarchicalSurfacePredictor(chainer.Chain):
             self.upsample_prob += 1e-4
         xp = cuda.get_array_module(x)
         latent_vector = self.encoder(x)
-        F = self.decoder(latent_vector)
+        f = self.decoder(latent_vector)
 
-        hierarchy_volumes = {} if save_hierarchy else None
-        output_volume = self.upsample_cascade(F, hierarchy_volumes)
+        if save_hierarchy:
+            hierarchy_volumes = {
+                i: self.get_hierarchy_output_array(i)
+                for i in range(1, self.n_level)
+            }
+        else:
+            hierarchy_volumes = None
+        output_volume = self.upsample_cascade(f, hierarchy_volumes)
 
         if save_hierarchy:
             output_hierarchy_volumes = {}
             for k, v in hierarchy_volumes.items():
                 if len(v) == 1:
-                    output_hierarchy_volumes[k] = v[0]
+                    output_hierarchy_volumes[k] = v[0, 0, 0]
                 else:
                     output_hierarchy_volumes[k] = concat_volume(
-                        v, pad=0
+                        v.ravel().tolist(), pad=0,
+                        stack_shape=(2**(k - 1), ) * 3
                     )
             output_hierarchy_volumes[0] = self.get_cascade_output(
-                self.O00(F)
+                self.O00(f)
             )[:, :, 2:18, 2:18, 2:18]
 
             return output_volume, output_hierarchy_volumes
         else:
             return output_volume
 
-    def upsample_cascade(self, f, hierarchy_volumes=None, level=1, pos=None):
+    def upsample_cascade(self, f, hierarchy_volumes=None, level=1, pos=[]):
 
         def get_item(x, region, channel=None):
             if channel is None:
@@ -129,6 +136,7 @@ class HierarchicalSurfacePredictor(chainer.Chain):
                 is_boundary = level == 1 or any(self.is_upsample(
                     get_item(pred_volume, in_slices, channel=j)
                 ) for j in range(1, pred_volume.shape[1], 2))
+                is_boundary = True
                 if is_boundary:
                     if upsampled_feature is None:
                         upsampled_feature = getattr(self, 'U%02d' % level)(f)
@@ -139,15 +147,19 @@ class HierarchicalSurfacePredictor(chainer.Chain):
                     cascade_output = self.upsample_cascade(
                         get_item(upsampled_feature, in_slices),
                         hierarchy_volumes,
-                        level=level+1
+                        level=level+1,
+                        pos=pos+[i,]
                     )
                 else:
-                    cascade_output = F.unpooling_3d(
-                        self.get_cascade_output(pred_volume),
-                        ksize=2, stride=2, cover_all=False
+                    slices = tuple(
+                        slice(self.pad, pred_volume.shape[j+2] - self.pad)
+                        for j in range(pred_volume.ndim - 2)
                     )
-                    if hierarchy_volumes is not None:
-                        hierarchy_outputs.append(cascade_output)
+
+                    cascade_output = self.upsample_not_boundary(
+                        self.get_cascade_output(get_item(pred_volume, slices)),
+                        hierarchy_volumes, level=level+1, pos=pos+[i,]
+                    )
 
                 cascade_outputs.append(cascade_output)
             else:  # not to upsample on the final level.
@@ -159,12 +171,46 @@ class HierarchicalSurfacePredictor(chainer.Chain):
         else:
             pad = 0
 
-        if hierarchy_volumes is not None and level != self.n_level:
-            hierarchy_volumes.setdefault(level, []).append(
-                concat_volume(hierarchy_outputs, pad=2)
-            )
+        if hierarchy_volumes is not None and level != self.n_level and len(hierarchy_outputs) != 0:
+            slices = self.get_hierarchy_slices(hierarchy_volumes[level].shape, pos)
+            roi = hierarchy_volumes[level]
+            for s in slices:
+                roi = roi[s]
+            roi[0, 0, 0] = concat_volume(hierarchy_outputs, pad=2)
 
         return concat_volume(cascade_outputs, pad=pad)
+
+    def upsample_not_boundary(self, volume, hierarchy_volumes=None, level=1, pos=[]):
+        upsampled_volume = F.unpooling_3d(
+            volume,
+            ksize=2, stride=2, cover_all=False
+        )
+        block_size = [s * 2 for s in self.block_size]
+        if level != self.n_level:
+            if hierarchy_volumes is not None:
+                roi = hierarchy_volumes[level]
+                roi_slices = self.get_hierarchy_slices(roi.shape, pos)
+                for s in roi_slices:
+                    roi = roi[s]
+
+                for i in range(roi.size):
+                    roi_index = np.unravel_index(i, roi.shape)
+                    slices = [slice(upsampled_volume.shape[0]), slice(upsampled_volume.shape[1])] + [
+                        slice(j * bs, j * bs + bs) for j, bs in zip(roi_index, block_size)
+                    ]
+
+                    roi[roi_index] = upsampled_volume[tuple(slices)]
+
+            cascade_output = self.upsample_not_boundary(
+                upsampled_volume,
+                hierarchy_volumes=hierarchy_volumes,
+                level=level+1,
+                pos=pos
+            )
+
+            return cascade_output
+        else:
+            return upsampled_volume
 
     def get_cascade_output(self, pred_volume):
         volumes = (pred_volume[:, 0, ],) + tuple(
@@ -173,3 +219,26 @@ class HierarchicalSurfacePredictor(chainer.Chain):
         )
         volumes = tuple(F.expand_dims(x, axis=1) for x in volumes)
         return F.concat(volumes, axis=1)
+
+
+    def get_hierarchy_output_array(self, level):
+        shape = tuple(2 ** (level-1) for i in range(3))
+        a = np.empty(shape, dtype=np.object)
+        return a
+
+    def get_hierarchy_slices(self, shape, pos, stack_shape=(2, 2, 2)):
+        slices = []
+        block_shape = np.array(shape)
+        stack_shape = np.array(stack_shape)
+        for level, p in enumerate(pos):
+            index = np.unravel_index(p, stack_shape)
+            strides = (2 ** (len(pos) - level - 1), ) * 3
+
+            index = tuple(i * s for i, s in zip(index, strides))
+
+            block_shape = block_shape // stack_shape
+
+            slices.append(
+                tuple(slice(i, i + s) for i, s in zip(index, block_shape))
+            )
+        return slices

@@ -74,6 +74,51 @@ class ConcatVolume(function_node.FunctionNode):
         return tuple(gys)
 
 
+def concat_volume_slow(xs, block_size, stack_shape, pad):
+    n_volume = reduce(lambda x, y: x * y, stack_shape)
+    assert n_volume == len(xs) # and n_volume == 8, 'Currently volume concatenation is only supported 2x2x2.'
+
+    if block_size is None:
+        block_size = tuple(s - pad * 2 for s in xs[0].shape[2:])
+
+    def get_item(x):
+        block_size
+        in_slices = [
+            slice(x.shape[0]), slice(x.shape[1]),
+            slice(pad, pad + block_size[0]),
+            slice(pad, pad + block_size[1]),
+            slice(pad, pad + block_size[2]),
+        ]
+        return x[in_slices]
+
+    xs = [get_item(x) for x in xs]
+    ys = []
+    stride = n_volume
+    for i in range(3):
+        ys = []
+        nx = stack_shape[i]
+        for j in range(0, len(xs), nx):
+            cxs = tuple(xs[k] for k in range(j, j + nx))
+            ys.append(F.concat(cxs, axis=2+i))
+        xs = ys
+
+    assert len(ys) == 1
+
+    #c_x1 = F.concat((get_item(xs[0])), axis=4)
+    #c_x2 = F.concat((get_item(xs[2]), get_item(xs[3])), axis=4)
+    #c_x3 = F.concat((get_item(xs[4]), get_item(xs[5])), axis=4)
+    #c_x4 = F.concat((get_item(xs[6]), get_item(xs[7])), axis=4)
+
+    #c_yx1 = F.concat((c_x1, c_x2), axis=3)
+    #c_yx2 = F.concat((c_x3, c_x4), axis=3)
+
+    #c_zyx = F.concat((c_yx1, c_yx2), axis=2)
+
+
+    return ys[0]
+
+
 def concat_volume(xs, block_size=None, stack_shape=(2, 2, 2), pad=2):
-    y, = ConcatVolume(block_size, stack_shape, pad).apply(xs)
+    #y, = ConcatVolume(block_size, stack_shape, pad).apply(xs)
+    y = concat_volume_slow(xs, block_size, stack_shape, pad)
     return y

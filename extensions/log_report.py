@@ -102,7 +102,7 @@ class LogReport(extension.Extension):
             fp.write(','.join(str(data[h]) if h in data.keys() else ','.join(' ') for h in self._keys) + '\n')
 
         # write JSON file
-        self._write_json_log(self._log_json_name, entry)
+        # self._write_json_log(self._log_json_name, entry)
 
 
     def __call__(self, trainer):

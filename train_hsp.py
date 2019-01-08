@@ -40,7 +40,7 @@ def main():
                         help='Number of sweeps over the dataset to train')
     parser.add_argument('--frequency', type=int, default=-1,
                         help='Frequency of taking a snapshot')
-    parser.add_argument('--gpu', '-g', type=int, default=0,
+    parser.add_argument('--gpu', '-g', type=int, nargs='+', default=[0],
                         help='GPU ID (negative value indicates CPU)')
     parser.add_argument('--dataset', required=True,
                         help='Directory of image files.')
@@ -78,10 +78,10 @@ def main():
     model = HierarchicalSurfacePredictor(out_ch=3, n_level=args.n_level)
     opt_model = HierarchicalLoss(model)
 
-    if args.gpu >= 0:
+    if len(args.gpu) == 1 and args.gpu[0] >= 0:
         # cuda.get_device(args.gpu).use()
-        cuda.get_device_from_id(args.gpu).use()
-        model.to_gpu(args.gpu)
+        cuda.get_device_from_id(args.gpu[0]).use()
+        model.to_gpu(args.gpu[0])
 
     # setup optimizers
     def make_optimizer(model, alpha=0.0002, beta1=0.5):
@@ -120,10 +120,20 @@ def main():
     print('')
 
     # setup a trainer
-    updater = chainer.training.StandardUpdater(
-        iterator=train_iter,
-        optimizer=optimizer,
-        device=args.gpu)
+    if len(args.gpu) == 0:
+        updater = chainer.training.StandardUpdater(
+            iterator=train_iter,
+            optimizer=optimizer,
+            device=args.gpu[0])
+    else:
+        devices = {'main': args.gpu[0]}
+        for gpu in args.gpu[1:]:
+            devices['unit' + str(gpu)] = gpu
+        updater = chainer.training.ParallelUpdater(
+            iterator=train_iter,
+            optimizer=optimizer,
+            devices=devices
+        )
     trainer = training.Trainer(updater, (args.epoch, 'epoch'), out=out)
 
     frequency = args.epoch if args.frequency == -1 else max(1, args.frequency)
@@ -156,7 +166,7 @@ def main():
     validator = HspValidator(
         iterator=valid_iter,
         target=model,
-        device=args.gpu,
+        device=args.gpu[0],
         n_eval=1000)
     trainer.extend(
         validator,

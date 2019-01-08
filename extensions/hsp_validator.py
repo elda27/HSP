@@ -137,22 +137,37 @@ class HspValidator(extension.Extension):
         return summary.compute_mean()
 
     def save_images(self, output_dir, iteration, model, xs, ts):
-        pred_label_probs = model.y
+        pred_label_probs = F.softmax(model.y, axis=1)
         pred_hierarchy_label_probs = model.hy
 
-        pred_labels = F.argmax(F.softmax(pred_label_probs), axis=1)
+        pred_labels = F.argmax(pred_label_probs, axis=1)
+        cpu_pred_label_probs = self._to_cpu(pred_label_probs, unwrapped=True)
         cpu_pred_labels = self._to_cpu(pred_labels, unwrapped=True)
         for i in range(cpu_pred_labels.shape[0]):
+            # Save labels
             for name, image in zip(['pred_label', 'label', 'projection'], [cpu_pred_labels, ts, xs]):
                 filename = 'valid_{:08d}_{:03d}_{}.mhd'.format(iteration, i, name)
                 mhd.write(str(output_dir / filename), image[i])
 
+            # Save probs
+            for ch in range(cpu_pred_label_probs.shape[1]):
+                filename = 'valid_{:08d}_{:03d}_pred_label_probs_channel_{}.mhd'.format(iteration, i, ch)
+                mhd.write(str(output_dir / filename), cpu_pred_label_probs[i, ch])
+
         for level, image in pred_hierarchy_label_probs.items():
-            h_pred_labels = F.argmax(F.softmax(image), axis=1)
-            cpu_h_pred_labels = self._to_cpu(h_pred_labels, unwrapped=True)
-            for i in range(cpu_h_pred_labels.shape[0]):
+            d_pred_labe_probs = F.softmax(image)
+            d_pred_labels = F.argmax(d_pred_labe_probs, axis=1)
+            cpu_pred_label_probs = self._to_cpu(d_pred_labe_probs, unwrapped=True)
+            cpu_pred_labels = self._to_cpu(d_pred_labels, unwrapped=True)
+            for i in range(cpu_pred_labels.shape[0]):
                 filename = 'valid_{:08d}_{:03d}_pred_label_level_{}.mhd'.format(iteration, i, level)
                 mhd.write(
                     str(output_dir / filename),
-                    cpu_h_pred_labels[i]
+                    cpu_pred_labels[i]
                 )
+
+                for ch in range(cpu_pred_label_probs.shape[1]):
+                    filename = 'valid_{:08d}_{:03d}_pred_label_probs_level_{}_channel_{}.mhd'.format(
+                        iteration, i, level, ch
+                    )
+                    mhd.write(str(output_dir / filename), cpu_pred_label_probs[i, ch])

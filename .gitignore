@@ -5,3 +5,6 @@ logs
 .vscode
 exp
 __pycache__
+tests/*.mhd
+tests/*.raw
+tests/*.zraw

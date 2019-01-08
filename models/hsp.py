@@ -25,12 +25,21 @@ class HierarchicalSurfacePredictor(chainer.Chain):
     """
     pad=2
     delta_train_boundary_dicision = 1e-4
+    always_boudary_dicision=None
+
+    Encoder=Encoder
+    Decoder=Decoder
+    CascadeOutputUnit=CascadeOutputUnit
+    UpsampleUnit=UpsampleUnit
+    OutputUnit=OutputUnit
+
     def __init__(
         self,
-        in_ch=1, out_ch=1, n_level=5,
+        in_ch=1, out_ch=1, latent_dim=128, n_level=5,
         block_size=(16, 16, 16),
-        encoder=None, upsample_threshold=0.1,
-        upsample_prob_rule=None
+        upsample_threshold=0.1,
+        upsample_prob_rule=None,
+        encoder=None
     ):
         super().__init__()
 
@@ -50,23 +59,31 @@ class HierarchicalSurfacePredictor(chainer.Chain):
             if encoder is not None:
                 self.encoder = encoder
             else:
-                self.encoder = Encoder(
-                    in_ch, out_ch
+                self.encoder = self.Encoder(
+                    in_ch, latent_dim
                 )
             self.decoder = Decoder()
-            setattr(self, 'O%02d' % 0, CascadeOutputUnit(
+            setattr(self, 'O%02d' % 0, self.CascadeOutputUnit(
                 out_ch=self.cascade_out_ch
             ))
             for i in range(1, self.n_level):
-                setattr(self, 'O%02d' % i, CascadeOutputUnit(
+                setattr(self, 'O%02d' % i, self.CascadeOutputUnit(
                     out_ch=self.cascade_out_ch
                 ))
-                setattr(self, 'U%02d' % i, UpsampleUnit())
-            setattr(self, 'O%02d' % self.n_level, OutputUnit(
+                setattr(self, 'U%02d' % i, self.UpsampleUnit())
+            setattr(self, 'O%02d' % self.n_level, self.OutputUnit(
                 out_ch=out_ch
             ))
 
     def is_upsample(self, cascade):
+        if self.always_boudary_dicision is not None:
+            if self.always_boudary_dicision == 'boudary':
+                return True
+            if self.always_boudary_dicision == 'unboudary':
+                return False
+            if self.always_boudary_dicision == 'random':
+                return random.random() > 0.5
+
         if chainer.config.train and random.random() > self.upsample_prob:
             return True
         else:
@@ -100,15 +117,9 @@ class HierarchicalSurfacePredictor(chainer.Chain):
         output_volume = self.upsample_cascade(f, hierarchy_volumes)
 
         if save_hierarchy:
-            output_hierarchy_volumes = {}
-            for k, v in hierarchy_volumes.items():
-                if len(v) == 1:
-                    output_hierarchy_volumes[k] = v[0, 0, 0]
-                else:
-                    output_hierarchy_volumes[k] = concat_volume(
-                        v.ravel().tolist(), pad=0,
-                        stack_shape=(2**(k - 1), ) * 3
-                    )
+            output_hierarchy_volumes = self.concat_hierarchy_volumes(
+                hierarchy_volumes
+            )
             output_hierarchy_volumes[0] = self.get_cascade_output(
                 self.O00(f)
             )[:, :, 2:18, 2:18, 2:18]
@@ -200,7 +211,7 @@ class HierarchicalSurfacePredictor(chainer.Chain):
                         roi = roi[s]
 
                     for i in range(roi.size):
-                        roi_index = np.unravel_index(i, roi.shape)
+                        roi_index = np.unravel_index(i, roi.shape, order='F')
                         slices = [slice(upsampled_volume.shape[0]), slice(upsampled_volume.shape[1])] + [
                             slice(j * bs, j * bs + bs) for j, bs in zip(roi_index, block_size)
                         ]
@@ -217,6 +228,18 @@ class HierarchicalSurfacePredictor(chainer.Chain):
             return cascade_output
         else:
             return upsampled_volume
+
+    def concat_hierarchy_volumes(self, hierarchy_volumes):
+        output_hierarchy_volumes = {}
+        for k, v in hierarchy_volumes.items():
+            if len(v) == 1:
+                output_hierarchy_volumes[k] = v[0, 0, 0]
+            else:
+                output_hierarchy_volumes[k] = concat_volume(
+                    v.ravel().tolist(), pad=0,
+                    stack_shape=(2**(k - 1), ) * 3
+                )
+        return output_hierarchy_volumes
 
     def get_cascade_output(self, pred_volume):
         volumes = (pred_volume[:, 0, ],) + tuple(
@@ -237,7 +260,7 @@ class HierarchicalSurfacePredictor(chainer.Chain):
         block_shape = np.array(shape)
         stack_shape = np.array(stack_shape)
         for level, p in enumerate(pos):
-            index = np.unravel_index(p, stack_shape)
+            index = np.unravel_index(p, stack_shape, order='F')
             strides = (stride * 2 ** (len(pos) - level - 1), ) * 3
 
             index = tuple(i * s for i, s in zip(index, strides))

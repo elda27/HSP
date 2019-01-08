@@ -76,7 +76,7 @@ class ConcatVolume(function_node.FunctionNode):
 
 def concat_volume_slow(xs, block_size, stack_shape, pad):
     n_volume = reduce(lambda x, y: x * y, stack_shape)
-    assert n_volume == len(xs) # and n_volume == 8, 'Currently volume concatenation is only supported 2x2x2.'
+    assert n_volume == len(xs), 'lhs: {}, rhs: {}'.format(n_volume, len(xs))
 
     if block_size is None:
         block_size = tuple(s - pad * 2 for s in xs[0].shape[2:])
@@ -89,7 +89,7 @@ def concat_volume_slow(xs, block_size, stack_shape, pad):
             slice(pad, pad + block_size[1]),
             slice(pad, pad + block_size[2]),
         ]
-        return x[in_slices]
+        return x[tuple(in_slices)]
 
     xs = [get_item(x) for x in xs]
     ys = []

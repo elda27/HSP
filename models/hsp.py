@@ -24,6 +24,7 @@ class HierarchicalSurfacePredictor(chainer.Chain):
         Proc. - 2017 Int. Conf. 3D Vision, 3DV 2017, pp. 412–420, 2018.
     """
     pad=2
+    delta_train_boundary_dicision = 1e-4
     def __init__(
         self,
         in_ch=1, out_ch=1, n_level=5,
@@ -84,7 +85,7 @@ class HierarchicalSurfacePredictor(chainer.Chain):
 
     def __call__(self, x, save_hierarchy=False):
         if chainer.config.train:
-            self.upsample_prob += 1e-4
+            self.upsample_prob += self.delta_train_boundary_dicision
         xp = cuda.get_array_module(x)
         latent_vector = self.encoder(x)
         f = self.decoder(latent_vector)
@@ -136,14 +137,16 @@ class HierarchicalSurfacePredictor(chainer.Chain):
                 is_boundary = level == 1 or any(self.is_upsample(
                     get_item(pred_volume, in_slices, channel=j)
                 ) for j in range(1, pred_volume.shape[1], 2))
-                is_boundary = True
+
+                if hierarchy_volumes is not None:
+                    hierarchy_outputs.append(
+                        self.get_cascade_output(pred_volume)
+                    )
+
                 if is_boundary:
                     if upsampled_feature is None:
                         upsampled_feature = getattr(self, 'U%02d' % level)(f)
-                    if hierarchy_volumes is not None:
-                        hierarchy_outputs.append(
-                            self.get_cascade_output(pred_volume)
-                        )
+
                     cascade_output = self.upsample_cascade(
                         get_item(upsampled_feature, in_slices),
                         hierarchy_volumes,
@@ -158,7 +161,7 @@ class HierarchicalSurfacePredictor(chainer.Chain):
 
                     cascade_output = self.upsample_not_boundary(
                         self.get_cascade_output(get_item(pred_volume, slices)),
-                        hierarchy_volumes, level=level+1, pos=pos+[i,]
+                        hierarchy_volumes, level=level, pos=pos+[i,]
                     )
 
                 cascade_outputs.append(cascade_output)
@@ -189,17 +192,20 @@ class HierarchicalSurfacePredictor(chainer.Chain):
         if level != self.n_level:
             if hierarchy_volumes is not None:
                 roi = hierarchy_volumes[level]
-                roi_slices = self.get_hierarchy_slices(roi.shape, pos)
-                for s in roi_slices:
-                    roi = roi[s]
+                if roi.size == 1:
+                    roi[0, 0, 0] = upsampled_volume
+                else:
+                    roi_slices = self.get_hierarchy_slices(roi.shape, pos, stride=level-len(pos))
+                    for s in roi_slices:
+                        roi = roi[s]
 
-                for i in range(roi.size):
-                    roi_index = np.unravel_index(i, roi.shape)
-                    slices = [slice(upsampled_volume.shape[0]), slice(upsampled_volume.shape[1])] + [
-                        slice(j * bs, j * bs + bs) for j, bs in zip(roi_index, block_size)
-                    ]
+                    for i in range(roi.size):
+                        roi_index = np.unravel_index(i, roi.shape)
+                        slices = [slice(upsampled_volume.shape[0]), slice(upsampled_volume.shape[1])] + [
+                            slice(j * bs, j * bs + bs) for j, bs in zip(roi_index, block_size)
+                        ]
 
-                    roi[roi_index] = upsampled_volume[tuple(slices)]
+                        roi[roi_index] = upsampled_volume[tuple(slices)]
 
             cascade_output = self.upsample_not_boundary(
                 upsampled_volume,
@@ -226,13 +232,13 @@ class HierarchicalSurfacePredictor(chainer.Chain):
         a = np.empty(shape, dtype=np.object)
         return a
 
-    def get_hierarchy_slices(self, shape, pos, stack_shape=(2, 2, 2)):
+    def get_hierarchy_slices(self, shape, pos, stride=1, stack_shape=(2, 2, 2)):
         slices = []
         block_shape = np.array(shape)
         stack_shape = np.array(stack_shape)
         for level, p in enumerate(pos):
             index = np.unravel_index(p, stack_shape)
-            strides = (2 ** (len(pos) - level - 1), ) * 3
+            strides = (stride * 2 ** (len(pos) - level - 1), ) * 3
 
             index = tuple(i * s for i, s in zip(index, strides))
 

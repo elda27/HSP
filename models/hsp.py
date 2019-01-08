@@ -79,7 +79,7 @@ class HierarchicalSurfacePredictor(chainer.Chain):
         if self.always_boudary_dicision is not None:
             if self.always_boudary_dicision == 'boudary':
                 return True
-            if self.always_boudary_dicision == 'unboudary':
+            if self.always_boudary_dicision == 'unboundary':
                 return False
             if self.always_boudary_dicision == 'random':
                 return random.random() > 0.5
@@ -128,7 +128,7 @@ class HierarchicalSurfacePredictor(chainer.Chain):
         else:
             return output_volume
 
-    def upsample_cascade(self, f, hierarchy_volumes=None, level=1, pos=[]):
+    def upsample_cascade(self, f, hierarchy_volumes=None, level=1, pos=[], unboundary_volume=None):
 
         def get_item(x, region, channel=None):
             if channel is None:
@@ -136,15 +136,21 @@ class HierarchicalSurfacePredictor(chainer.Chain):
             else:
                 return x[(slice(x.shape[0]), channel) + region]
 
+        for_unboundary_upsampling = unboundary_volume is not None
+
         upsampled_feature = None
-        pred_volume = getattr(self, 'O%02d' % level)(f)
+        if not for_unboundary_upsampling:
+            pred_volume = getattr(self, 'O%02d' % level)(f)
+        else:
+            pred_volume = self.get_cascade_output(unboundary_volume) if level == self.n_level else unboundary_volume
+
 
         cascade_outputs = []
         hierarchy_outputs = []
         for i in range(8):
-            in_slices = self.compute_slices(i, self.block_size)
 
             if level != self.n_level:
+                in_slices = self.compute_slices(i, self.block_size)
                 is_boundary = level == 1 or any(self.is_upsample(
                     get_item(pred_volume, in_slices, channel=j)
                 ) for j in range(1, pred_volume.shape[1], 2))
@@ -154,7 +160,7 @@ class HierarchicalSurfacePredictor(chainer.Chain):
                         self.get_cascade_output(pred_volume)
                     )
 
-                if is_boundary:
+                if is_boundary and not for_unboundary_upsampling:
                     if upsampled_feature is None:
                         upsampled_feature = getattr(self, 'U%02d' % level)(f)
 
@@ -165,14 +171,25 @@ class HierarchicalSurfacePredictor(chainer.Chain):
                         pos=pos+[i,]
                     )
                 else:
-                    slices = tuple(
-                        slice(self.pad, pred_volume.shape[j+2] - self.pad)
-                        for j in range(pred_volume.ndim - 2)
-                    )
-
-                    cascade_output = self.upsample_not_boundary(
-                        self.get_cascade_output(get_item(pred_volume, slices)),
-                        hierarchy_volumes, level=level, pos=pos+[i,]
+                    in_slices = self.compute_slices(i, self.block_size, pad=0)
+                    if not for_unboundary_upsampling:
+                        slices = tuple(
+                            slice(self.pad, pred_volume.shape[j+2] - self.pad)
+                            for j in range(pred_volume.ndim - 2)
+                        )
+                        _unboundary_volume = get_item(pred_volume, slices)
+                    else:
+                        _unboundary_volume = unboundary_volume
+                        # _unboundary_volume = F.unpooling_3d(
+                        #     _unboundary_volume,
+                        #     ksize=2, stride=2, cover_all=False
+                        # )
+                    cascade_output = self.upsample_cascade(
+                        None,
+                        hierarchy_volumes,
+                        level=level+1,
+                        pos=pos+[i,],
+                        unboundary_volume=_unboundary_volume
                     )
 
                 cascade_outputs.append(cascade_output)
@@ -180,7 +197,7 @@ class HierarchicalSurfacePredictor(chainer.Chain):
                 cascade_outputs.append(pred_volume)
                 # hierarchy_outputs.append(cascade_output)
 
-        if self.n_level == level:
+        if self.n_level == level and not for_unboundary_upsampling:
             pad = 2
         else:
             pad = 0
@@ -190,44 +207,9 @@ class HierarchicalSurfacePredictor(chainer.Chain):
             roi = hierarchy_volumes[level]
             for s in slices:
                 roi = roi[s]
-            roi[0, 0, 0] = concat_volume(hierarchy_outputs, pad=2)
+            roi[0, 0, 0] = concat_volume(hierarchy_outputs, pad=0 if for_unboundary_upsampling else 2)
 
         return concat_volume(cascade_outputs, pad=pad)
-
-    def upsample_not_boundary(self, volume, hierarchy_volumes=None, level=1, pos=[]):
-        upsampled_volume = F.unpooling_3d(
-            volume,
-            ksize=2, stride=2, cover_all=False
-        )
-        block_size = [s * 2 for s in self.block_size]
-        if level != self.n_level:
-            if hierarchy_volumes is not None:
-                roi = hierarchy_volumes[level]
-                if roi.size == 1:
-                    roi[0, 0, 0] = upsampled_volume
-                else:
-                    roi_slices = self.get_hierarchy_slices(roi.shape, pos, stride=level-len(pos))
-                    for s in roi_slices:
-                        roi = roi[s]
-
-                    for i in range(roi.size):
-                        roi_index = np.unravel_index(i, roi.shape, order='F')
-                        slices = [slice(upsampled_volume.shape[0]), slice(upsampled_volume.shape[1])] + [
-                            slice(j * bs, j * bs + bs) for j, bs in zip(roi_index, block_size)
-                        ]
-
-                        roi[roi_index] = upsampled_volume[tuple(slices)]
-
-            cascade_output = self.upsample_not_boundary(
-                upsampled_volume,
-                hierarchy_volumes=hierarchy_volumes,
-                level=level+1,
-                pos=pos
-            )
-
-            return cascade_output
-        else:
-            return upsampled_volume
 
     def concat_hierarchy_volumes(self, hierarchy_volumes):
         output_hierarchy_volumes = {}

@@ -74,7 +74,7 @@ class ConcatVolume(function_node.FunctionNode):
         return tuple(gys)
 
 
-def concat_volume_slow(xs, block_size, stack_shape, pad):
+def concat_volume_slow(xs, block_size=None, stack_shape=(2, 2, 2), pad=2):
     n_volume = reduce(lambda x, y: x * y, stack_shape)
     assert n_volume == len(xs), 'lhs: {}, rhs: {}'.format(n_volume, len(xs))
 
@@ -99,21 +99,10 @@ def concat_volume_slow(xs, block_size, stack_shape, pad):
         nx = stack_shape[i]
         for j in range(0, len(xs), nx):
             cxs = tuple(xs[k] for k in range(j, j + nx))
-            ys.append(F.concat(cxs, axis=2+i))
+            ys.append(F.concat(cxs, axis=xs[0].ndim-i-1))
         xs = ys
 
     assert len(ys) == 1
-
-    #c_x1 = F.concat((get_item(xs[0])), axis=4)
-    #c_x2 = F.concat((get_item(xs[2]), get_item(xs[3])), axis=4)
-    #c_x3 = F.concat((get_item(xs[4]), get_item(xs[5])), axis=4)
-    #c_x4 = F.concat((get_item(xs[6]), get_item(xs[7])), axis=4)
-
-    #c_yx1 = F.concat((c_x1, c_x2), axis=3)
-    #c_yx2 = F.concat((c_x3, c_x4), axis=3)
-
-    #c_zyx = F.concat((c_yx1, c_yx2), axis=2)
-
 
     return ys[0]
 

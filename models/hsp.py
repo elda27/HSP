@@ -25,7 +25,7 @@ class HierarchicalSurfacePredictor(chainer.Chain):
     """
     pad=2
     delta_train_boundary_dicision = 1e-4
-    always_boudary_dicision=None
+    always_boudary_dicision='boundary'
 
     Encoder=Encoder
     Decoder=Decoder
@@ -46,10 +46,11 @@ class HierarchicalSurfacePredictor(chainer.Chain):
 
         self.in_ch = in_ch
         self.out_ch = out_ch
-        if out_ch == 1:
-            self.cascade_out_ch = 3
-        else:
-            self.cascade_out_ch = 2 * out_ch - 1
+        self.cascade_out_ch = self.out_ch
+        # if out_ch == 1:
+        #     self.cascade_out_ch = 3
+        # else:
+        #     self.cascade_out_ch = 2 * out_ch - 1
         self.n_level = n_level - 1 # zero-based level
         self.n_output_hidden_layers = n_output_hidden_layers
         self.block_size = block_size
@@ -152,7 +153,6 @@ class HierarchicalSurfacePredictor(chainer.Chain):
         cascade_outputs = []
         hierarchy_outputs = []
         for i in range(8):
-
             if level != self.n_level:
                 in_slices = self.compute_slices(i, self.block_size)
                 is_boundary = level == 1 or any(self.is_upsample(
@@ -183,6 +183,8 @@ class HierarchicalSurfacePredictor(chainer.Chain):
                         )
                         _unboundary_volume = get_item(pred_volume, slices)
                     else:
+                        # Unboundary area is always filled or empty so
+                        # concat same volume instead of the upsampling by unpooling.
                         _unboundary_volume = unboundary_volume
                         # _unboundary_volume = F.unpooling_3d(
                         #     _unboundary_volume,
@@ -228,12 +230,13 @@ class HierarchicalSurfacePredictor(chainer.Chain):
         return output_hierarchy_volumes
 
     def get_cascade_output(self, pred_volume):
-        volumes = (pred_volume[:, 0, ],) + tuple(
-            pred_volume[:, i, ...] + pred_volume[:, i + 1, ...]
-            for i in range(1, pred_volume.shape[1], 2)
-        )
-        volumes = tuple(F.expand_dims(x, axis=1) for x in volumes)
-        return F.concat(volumes, axis=1)
+        return pred_volume
+        # volumes = (pred_volume[:, 0, ],) + tuple(
+        #     pred_volume[:, i, ...] + pred_volume[:, i + 1, ...]
+        #     for i in range(1, pred_volume.shape[1], 2)
+        # )
+        # volumes = tuple(F.expand_dims(x, axis=1) for x in volumes)
+        # return F.concat(volumes, axis=1)
 
 
     def get_hierarchy_output_array(self, level):

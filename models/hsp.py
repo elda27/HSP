@@ -15,6 +15,7 @@ from models.cascade_output_unit import CascadeOutputUnit
 
 from models.concat_volume import concat_volume
 
+from models.hierarchy_misc import get_hierarchy_slices
 
 class HierarchicalSurfacePredictor(chainer.Chain):
     """
@@ -207,7 +208,7 @@ class HierarchicalSurfacePredictor(chainer.Chain):
             pad = 0
 
         if hierarchy_volumes is not None and level != self.n_level and len(hierarchy_outputs) != 0:
-            slices = self.get_hierarchy_slices(hierarchy_volumes[level].shape, pos)
+            slices = get_hierarchy_slices(hierarchy_volumes[level].shape, pos)
             roi = hierarchy_volumes[level]
             for s in slices:
                 roi = roi[s]
@@ -229,7 +230,7 @@ class HierarchicalSurfacePredictor(chainer.Chain):
 
     def get_cascade_output(self, pred_volume):
         volumes = (pred_volume[:, 0, ],) + tuple(
-            pred_volume[:, i, ...] + pred_volume[:, i + 1, ...]
+            pred_volume[:, i + 1, ...]
             for i in range(1, pred_volume.shape[1], 2)
         )
         volumes = tuple(F.expand_dims(x, axis=1) for x in volumes)
@@ -240,20 +241,3 @@ class HierarchicalSurfacePredictor(chainer.Chain):
         shape = tuple(2 ** (level-1) for i in range(3))
         a = np.empty(shape, dtype=np.object)
         return a
-
-    def get_hierarchy_slices(self, shape, pos, stride=1, stack_shape=(2, 2, 2)):
-        slices = []
-        block_shape = np.array(shape)
-        stack_shape = np.array(stack_shape)
-        for level, p in enumerate(pos):
-            index = np.unravel_index(p, stack_shape)
-            strides = (stride * 2 ** (len(pos) - level - 1), ) * 3
-
-            index = tuple(i * s for i, s in zip(index, strides))
-
-            block_shape = block_shape // stack_shape
-
-            slices.append(
-                tuple(slice(i, i + s) for i, s in zip(index, block_shape))
-            )
-        return slices

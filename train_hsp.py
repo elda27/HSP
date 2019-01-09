@@ -6,6 +6,7 @@ import random
 import matplotlib
 
 from models import HierarchicalSurfacePredictor, HierarchicalLoss
+from models.simple_upsample_unit import  SimpleUpsampleUnit
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -57,6 +58,7 @@ def main():
     parser.add_argument('--seed', type=int, default=0,
                         help='Random seed')
     parser.add_argument('--n-level', type=int, default=3)
+    parser.add_argument('--use-simple-upsampling', action='store_true', default=False)
     args = parser.parse_args()
 
     set_random_seed(args.seed)
@@ -76,6 +78,8 @@ def main():
     print('')
 
     # setup models
+    if args.use_simple_upsampling:
+        HierarchicalSurfacePredictor.UpsampleUnit = SimpleUpsampleUnit
     model = HierarchicalSurfacePredictor(
         out_ch=3,
         n_level=args.n_level,
@@ -90,7 +94,8 @@ def main():
 
     # setup optimizers
     def make_optimizer(model, alpha=0.0002, beta1=0.5):
-        optimizer = chainer.optimizers.Adam(alpha=alpha, beta1=beta1)
+        #optimizer = chainer.optimizers.Adam(alpha=alpha, beta1=beta1)
+        optimizer = chainer.optimizers.Adam(alpha=1e-4)
         optimizer.setup(model)
         optimizer.add_hook(chainer.optimizer.WeightDecay(0.00001), 'hook_dec')
         return optimizer

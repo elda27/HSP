@@ -48,6 +48,7 @@ def main():
     # parser.add_argument('--cvindex', type=int, default=0)
     parser.add_argument('--train-index', type=str, required=True)
     parser.add_argument('--valid-index', type=str, required=True)
+    parser.add_argument('--n-output-hidden-layers', type=int, default=2, required=False)
     parser.add_argument('--exp-name', type=str, default='reconstruction')
     parser.add_argument('--out', '-o', default='logs',
                         help='Directory to output the result')
@@ -75,7 +76,11 @@ def main():
     print('')
 
     # setup models
-    model = HierarchicalSurfacePredictor(out_ch=3, n_level=args.n_level)
+    model = HierarchicalSurfacePredictor(
+        out_ch=3,
+        n_level=args.n_level,
+        n_output_hidden_layers=args.n_output_hidden_layers
+    )
     opt_model = HierarchicalLoss(model)
 
     if len(args.gpu) == 1 and args.gpu[0] >= 0:

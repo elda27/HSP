@@ -39,6 +39,7 @@ class HierarchicalSurfacePredictor(chainer.Chain):
         block_size=(16, 16, 16),
         upsample_threshold=0.1,
         upsample_prob_rule=None,
+        n_output_hidden_layers=2,
         encoder=None
     ):
         super().__init__()
@@ -50,6 +51,7 @@ class HierarchicalSurfacePredictor(chainer.Chain):
         else:
             self.cascade_out_ch = 2 * out_ch - 1
         self.n_level = n_level - 1 # zero-based level
+        self.n_output_hidden_layers = n_output_hidden_layers
         self.block_size = block_size
         self.out_size = tuple(b * (2 ** n_level) for b in block_size)
         self.upsample_threshold = upsample_threshold
@@ -68,11 +70,13 @@ class HierarchicalSurfacePredictor(chainer.Chain):
             ))
             for i in range(1, self.n_level):
                 setattr(self, 'O%02d' % i, self.CascadeOutputUnit(
-                    out_ch=self.cascade_out_ch
+                    out_ch=self.cascade_out_ch,
+                    n_hidden_layers=n_output_hidden_layers
                 ))
                 setattr(self, 'U%02d' % i, self.UpsampleUnit())
             setattr(self, 'O%02d' % self.n_level, self.OutputUnit(
-                out_ch=out_ch
+                out_ch=out_ch,
+                n_hidden_layers=n_output_hidden_layers,
             ))
 
     def is_upsample(self, cascade):
@@ -242,7 +246,7 @@ class HierarchicalSurfacePredictor(chainer.Chain):
         block_shape = np.array(shape)
         stack_shape = np.array(stack_shape)
         for level, p in enumerate(pos):
-            index = np.unravel_index(p, stack_shape, order='F')
+            index = np.unravel_index(p, stack_shape)
             strides = (stride * 2 ** (len(pos) - level - 1), ) * 3
 
             index = tuple(i * s for i, s in zip(index, strides))

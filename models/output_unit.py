@@ -47,11 +47,10 @@ class OutputUnit(chainer.Chain):
 
                 i0 = i1
                 i1 = max(i1 // 2, self.out_ch)
-            setattr(self, 'c%02d' % self.n_hidden_layers, CBR(
-                3, i0, self.out_ch, ksize=3, stride=1,
-                activation=F.relu, sample='down',
-                bn=self.use_batch_norm, dropout=self.dropout,
-            ))
+            setattr(
+                self, 'c%02d' % self.n_hidden_layers,
+                L.Convolution3D(i0, self.out_ch, 3, 1, pad=1)
+            )
 
     def __call__(self, x):
         h = x

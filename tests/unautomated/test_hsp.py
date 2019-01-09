@@ -1,3 +1,4 @@
+import pytest
 import chainer
 import chainer.functions as F
 from models.hsp import HierarchicalSurfacePredictor
@@ -27,35 +28,21 @@ class moc_Decoder(chainer.Chain):
 
 
 class moc_UpsampleUnit(chainer.Chain):
+    instance_count=0
     def __init__(self):
+        moc_UpsampleUnit.instance_count += 1
+        self.counter = moc_UpsampleUnit.instance_count
         self.upsampled_counter = 1
 
     def __call__(self, x):
         data = []
-        # for i in range(8):
-        #     if x.data[0,0,0,0,0] == 1:
-        #         self.upsampled_counter += 1
-        #         n = self.upsampled_counter
-        #     else:
-        #         n = x.data[0, 0, 0, 0, 0]
-        #     block = np.ones(x.shape, dtype=np.float32) * n * 8 + i
-        #     data.append(
-        #         chainer.Variable(block)
-        #     )
-        h = np.ones(
-            x.shape[:2] + tuple(np.array(x.shape[2:]) * 2)
-        )
+        self.upsampled_counter += 1
+        p = np.amax(x.data)
+        digit = int(np.log10(p) + 1)
+        h = p * np.ones(
+            x.shape[:2] + tuple(np.array(x.shape[2:]) * 2 - 4)
+        ) + 100 ** (self.counter) * self.upsampled_counter
         return h
-
-class moc_CascadeOutputUnit(chainer.Chain):
-    def __init__(self, out_ch):
-        self.out_ch = out_ch
-        self.counter = 1
-
-    def __call__(self, x):
-        self.counter += 1
-        return x[:, :self.out_ch, ...] * self.counter
-
 
 class moc_OutputUnit(chainer.Chain):
     def __init__(self, out_ch):
@@ -64,13 +51,20 @@ class moc_OutputUnit(chainer.Chain):
 
     def __call__(self, x):
         self.counter += 1
-        return x[:, :self.out_ch, ...] * self.counter
+        return x[:, :self.out_ch, ...] + self.counter
 
-
+@pytest.mark.parametrize("boundary_dicision,n_level", [
+    ('boundary', 4),
+    ('unboundary', 4),
+    ('random', 4),
+    ('boundary', 5),
+    ('unboundary', 5),
+    ('random', 5),
+])
 def test_upsample(boundary_dicision, n_level):
     HierarchicalSurfacePredictor.Encoder = moc_Encoder
     HierarchicalSurfacePredictor.Decoder = moc_Decoder
-    HierarchicalSurfacePredictor.CascadeOutputUnit = moc_CascadeOutputUnit
+    HierarchicalSurfacePredictor.CascadeOutputUnit = moc_OutputUnit
     HierarchicalSurfacePredictor.UpsampleUnit = moc_UpsampleUnit
     HierarchicalSurfacePredictor.OutputUnit = moc_OutputUnit
 
@@ -86,7 +80,6 @@ def test_upsample(boundary_dicision, n_level):
     volume = model.upsample_cascade(feature, hierarchy_volumes)
     hierarchy_volumes = model.concat_hierarchy_volumes(hierarchy_volumes)
 
-
     for ch in range(3):
         mhd.write('tests/{}_test_hsp_always_{}_volume_ch_{}.mhd'.format(n_level, boundary_dicision, ch), volume.data[0, ch])
         for level, v in hierarchy_volumes.items():
@@ -99,3 +92,4 @@ if __name__ == '__main__':
     test_upsample('boundary', 5)
     test_upsample('unboundary', 5)
     test_upsample('random', 5)
+    print('finish!')

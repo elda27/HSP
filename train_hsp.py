@@ -169,7 +169,7 @@ def main():
                                   'epoch', file_name='valid.png'))
 
     trainer.extend(extensions.PrintReport(['epoch', 'iteration'] + log_keys))
-
+    trainer.extend(extensions.dump_graph(root_name="main/loss", out_name="cg.dot"))
     trainer.extend(extensions.ProgressBar())
 
     # setup a validator
@@ -181,7 +181,7 @@ def main():
     trainer.extend(
         validator,
         trigger=(2500, 'iteration'))
-    validator(trainer)
+    # validator(trainer)
 
     if args.resume:
         chainer.serializers.load_npz(args.resume, trainer)

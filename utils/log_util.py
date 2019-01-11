@@ -11,7 +11,7 @@ def get_log_index(log_dir):
         return None
 
 
-def get_training_log_dir(root_dir, log_index, step_index, opt_name=None):
+def get_training_log_dir(root_dir, log_index, step_index=1, opt_name=None, test=False):
     """Get log directory
 
     Args:
@@ -33,7 +33,7 @@ def get_training_log_dir(root_dir, log_index, step_index, opt_name=None):
         else:  # After 1st stage training and log directory is user selected.
             return root_dir
     else:
-        if step_index == 1:  # 1st stage training and log index user defined.
+        if step_index == 1 and not test:  # 1st stage training and log index user defined.
             return get_new_training_log_dir(root_dir, start_index=log_index, opt_name=opt_name)
         else:  # After 1st stage training and log index user defined.
             log_dirs = [log_dir for log_dir in glob.glob(os.path.join(root_dir, str(log_index) + '-*')) if

@@ -3,6 +3,8 @@ import chainer.functions as F
 from chainer import reporter
 import cupy as cp
 
+from models.hierarchy_misc import make_label_for_hierarchical_loss
+
 class HierarchicalLoss(chainer.Chain):
     def __init__(self, model, keep_inference=False, observer=None):
         self.keep_inference = keep_inference
@@ -13,8 +15,8 @@ class HierarchicalLoss(chainer.Chain):
         hierarchical_losses = {}
 
         y, hy = self.model(x, save_hierarchy=True)
-        loss = F.softmax_cross_entropy(y, t)
-        loss_final = loss
+        loss_final = F.softmax_cross_entropy(y, t)
+        loss =  len(hy) * loss_final
 
         # Save current inference
         if self.keep_inference:
@@ -25,9 +27,10 @@ class HierarchicalLoss(chainer.Chain):
         dt = F.expand_dims(chainer.Variable(t.astype(cp.float32)), axis=1)
         for level, volume in hy:
             dt = F.max_pooling_3d(dt, ksize=2, stride=2)
+            downsampled_label = make_label_for_hierarchical_loss(dt.data)
             hl = F.softmax_cross_entropy(
                 volume,
-                chainer.Variable(dt[:, 0, ...].data.astype(cp.int32))
+                chainer.Variable(downsampled_label[:, 0, ...])
             )
             hierarchical_losses[level] = hl
             loss += hl

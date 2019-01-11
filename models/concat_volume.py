@@ -82,7 +82,6 @@ def concat_volume_slow(xs, block_size=None, stack_shape=(2, 2, 2), pad=2):
         block_size = tuple(s - pad * 2 for s in xs[0].shape[2:])
 
     def get_item(x):
-        block_size
         in_slices = [
             slice(x.shape[0]), slice(x.shape[1]),
             slice(pad, pad + block_size[0]),

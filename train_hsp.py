@@ -34,6 +34,7 @@ def set_random_seed(seed):
 def main():
     parser = argparse.ArgumentParser(
         description='chainer implementation of pix2pix')
+    parser.add_argument('-lr', '--lerning-rate', default=1e-5, type=int)
     parser.add_argument('--debug', action='store_true', default=False)
     parser.add_argument('--batchsize', '-b', type=int, default=1,
                         help='Number of images in each mini-batch')
@@ -95,7 +96,7 @@ def main():
     # setup optimizers
     def make_optimizer(model, alpha=0.0002, beta1=0.5):
         #optimizer = chainer.optimizers.Adam(alpha=alpha, beta1=beta1)
-        optimizer = chainer.optimizers.Adam(alpha=1e-4)
+        optimizer = chainer.optimizers.Adam(alpha=1e-5)
         optimizer.setup(model)
         optimizer.add_hook(chainer.optimizer.WeightDecay(0.00001), 'hook_dec')
         return optimizer
